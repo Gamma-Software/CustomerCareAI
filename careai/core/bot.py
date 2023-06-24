@@ -21,11 +21,15 @@ from careai.utils.configuration import Config
 from careai.core.prompts import load_character_info, adapt_prompt
 
 
+from careai.core.agents import DentalOfficeSecretaryGPT
+from langchain.chat_models import ChatOpenAI
+
 class CareaiBot:
 
     # Initialize the prompt and llm chain
     def __init__(self, conf: Config):
-        self.agent = self.test2(conf)
+        self.agent = self.test3(conf)
+
 
     def test1(self, conf):
 
@@ -110,7 +114,13 @@ class CareaiBot:
         executor = load_agent_executor(model, tools, verbose=True)
         return PlanAndExecute(planner=planner, executor=executor, verbose=True)
 
-    def process_input(self, user_input):
+    def test3(self, conf):
+        llm = ChatOpenAI(temperature=0.9, stop = "<END_OF_TURN>", verbose=True, openai_api_key=conf.open_ai_api_key)
+        agent = DentalOfficeSecretaryGPT.from_llm(llm, verbose=True, **conf.chatbot_setup)
+        agent.seed_agent()
+        return agent
+
+    def process_input(self, human_input):
         """Process user input and display response or error message
 
         Args:
@@ -122,8 +132,8 @@ class CareaiBot:
             Str:  AI message (Could be an error message)
         """
         try:
-            response = self.agent.run(user_input)
-            return True, response
+            self.agent.human_step(human_input)
+            return True, ""
         except Exception as e:
             print(e)
             error_message = "AI Assistant encountered an error. Please try again later."

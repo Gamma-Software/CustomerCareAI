@@ -1,4 +1,4 @@
-import os
+import json
 import configparser
 
 class Config:
@@ -16,6 +16,9 @@ class Config:
         self.__chatbot_info_path = parser.get('CHATBOT', 'CHAT_INFO_PATH')
         self.__chatbot_temperature = parser.get('CHATBOT', 'TEMPERATURE')
         self.__chatbot_max_token = parser.get('CHATBOT', 'MAX_TOKENS')
+
+        with open(self.__chatbot_info_path,'r') as f:
+            self.__chatbot_setup = json.load(f)
 
     @property
     def open_ai_api_key(self):
@@ -48,6 +51,10 @@ class Config:
     @property
     def chatbot_max_token(self):
         return self.__chatbot_max_token
+
+    @property
+    def chatbot_setup(self):
+        return self.__chatbot_setup
 
 
 def load(config_file="config.ini") -> Config:

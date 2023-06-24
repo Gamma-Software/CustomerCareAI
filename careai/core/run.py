@@ -6,6 +6,7 @@ from careai.core.bot import CareaiBot
 from careai.hmi.chat import CLI, Streamlit
 from careai.core.io import export_chat_history
 
+
 class Core:
 
     def __init__(self, interface):
@@ -39,17 +40,27 @@ class Core:
         if isinstance(self.hmi, Streamlit):
             return # Streamlit HMI does not need to run this
 
-        end_chat = False
-        while not end_chat:
+        max_num_turns = 10
+        print('='*10)
+        cnt = 0
+        while cnt !=max_num_turns:
+            cnt+=1
+            if cnt==max_num_turns:
+                print('Maximum number of turns reached - ending the conversation.')
+                break
+            self.bot.agent.step()
+
+            # end conversation
+            if '<END_OF_CALL>' in self.bot.conversation_history[-1]:
+                print('Agent determined it is time to end the conversation.')
+                break
             try:
                 user_input = self.hmi.get_user_input()
             except KeyboardInterrupt:
                 user_input = "exit"
-            end_chat = self.check_for_exit(user_input)
-            if not end_chat:
-                no_error, message = self.bot.process_input(user_input)
-                if no_error:
-                    print("AI: " + message)
-                else:
-                    end_chat = True
 
+            if not self.check_for_exit(user_input):
+                no_error, message = self.bot.process_input(user_input)
+                if not no_error:
+                    break
+            print('='*10)
