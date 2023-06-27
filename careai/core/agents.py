@@ -4,16 +4,29 @@ from typing import Any, Dict, List
 from langchain.chains.base import Chain
 from langchain.llms import BaseLLM
 from langchain import (
+    LLMChain,
     LLMMathChain,
-    OpenAI,
     SQLDatabase,
     SQLDatabaseChain
 )
-from langchain.agents import AgentType
-from langchain.agents import initialize_agent, Tool, AgentExecutor
+from langchain import PromptTemplate
+
+from langchain.agents import ZeroShotAgent, Tool, AgentExecutor
+from langchain import OpenAI, SerpAPIWrapper, LLMChain
+from langchain.prompts import MessagesPlaceholder
+from langchain.memory import ConversationBufferMemory
+from collections import deque
+from typing import Dict, List, Optional, Any
+
+from langchain.llms import BaseLLM
+from langchain.vectorstores.base import VectorStore
+from pydantic import BaseModel, Field
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.chains.base import Chain
+from langchain.agents import AgentExecutor
 from pydantic import BaseModel, Field
 
-from careai.core.chains import DentalOfficeSecretaryConversationChain, StageAnalyzerChain
+from careai.core.chains import DentalOfficeSecretaryConversationChain, StageAnalyzerChain, TaskCreationChain, TaskPrioritizationChain
 from careai.utils.logger import time_logger
 from careai.core.stages import CONVERSATION_STAGES
 
@@ -88,6 +101,10 @@ class DentalOfficeSecretaryGPT(Chain, BaseModel):
         """
         if not return_streaming_generator:
             self._call(inputs={})
+            # Check if the agent need a tool
+            if '<CALL_FOR_TOOLS>' in self.conversation_history[-1]:
+                human_input = self.conversation_history[-2]
+                self._call_for_tools({"objective": human_input})
         else:
             return self._streaming_generator()
 
@@ -144,7 +161,7 @@ class DentalOfficeSecretaryGPT(Chain, BaseModel):
         """Run one step of the agent."""
 
         # Generate agent's utterance
-        ai_message = self.agent_executor.run(
+        ai_message = self.sales_conversation_utterance_chain.run(
             conversation_stage=self.current_conversation_stage,
             conversation_history="\n".join(self.conversation_history),
             dental_office_secretary_name=self.dental_office_secretary_name,
@@ -161,6 +178,64 @@ class DentalOfficeSecretaryGPT(Chain, BaseModel):
         ai_message = agent_name + ": " + ai_message
         self.conversation_history.append(ai_message)
         print(ai_message.replace("<END_OF_TURN>", ""))
+        return {}
+
+    def _call_for_tools(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Run the agent tool helper."""
+        context = inputs["context"]
+        objective = inputs["objective"]
+        first_task = inputs.get("first_task", "Make a todo list")
+        self.add_task({"task_id": 1, "task_name": first_task})
+        num_iters = 0
+        while True:
+            if self.task_list:
+                self.print_task_list()
+
+                # Step 1: Pull the first task
+                task = self.task_list.popleft()
+                self.print_next_task(task)
+
+                # Step 2: Execute the task
+                result = execute_task(
+                    self.vectorstore, self.execution_chain, objective, task["task_name"]
+                )
+                this_task_id = int(task["task_id"])
+                self.print_task_result(result)
+
+                # Step 3: Store the result in Pinecone
+                result_id = f"result_{task['task_id']}"
+                self.vectorstore.add_texts(
+                    texts=[result],
+                    metadatas=[{"task": task["task_name"]}],
+                    ids=[result_id],
+                )
+
+                # Step 4: Create new tasks and reprioritize task list
+                new_tasks = get_next_task(
+                    self.task_creation_chain,
+                    result,
+                    task["task_name"],
+                    [t["task_name"] for t in self.task_list],
+                    objective,
+                )
+                for new_task in new_tasks:
+                    self.task_id_counter += 1
+                    new_task.update({"task_id": self.task_id_counter})
+                    self.add_task(new_task)
+                self.task_list = deque(
+                    prioritize_tasks(
+                        self.task_prioritization_chain,
+                        this_task_id,
+                        list(self.task_list),
+                        objective,
+                    )
+                )
+            num_iters += 1
+            if self.max_iterations is not None and num_iters == self.max_iterations:
+                print(
+                    "\033[91m\033[1m" + "\n*****TASK ENDING*****\n" + "\033[0m\033[0m"
+                )
+                break
         return {}
 
     @classmethod
@@ -211,10 +286,17 @@ class DentalOfficeSecretaryGPT(Chain, BaseModel):
                 description="useful for when you need add an appointment, modify it or remove it or add a patient, modify it or remove it or seeing the relation between the patient the doctor and the appoitments. Input should be in the form of a question containing full context",
             ),
         ]
+        llm_chain = LLMChain(llm=llm, prompt=prompt)
+        tool_names = [tool.name for tool in tools]
+        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names)
+        agent_executor = AgentExecutor.from_agent_and_tools(
+            agent=agent, tools=tools, verbose=True
+        )
 
         return cls(
             stage_analyzer_chain=stage_analyzer_chain,
             conversation_utterance_chain=conversation_utterance_chain,
+            agent_executor=agent_executor,
             verbose=verbose,
             **kwargs,
         )

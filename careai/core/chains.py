@@ -3,6 +3,55 @@ from langchain.llms import BaseLLM
 
 from careai.utils.logger import time_logger
 
+class TaskCreationChain(LLMChain):
+    """Chain to generates tasks."""
+
+    @classmethod
+    def from_llm(cls, llm: BaseLLM, verbose: bool = True) -> LLMChain:
+        """Get the response parser."""
+        task_creation_template = (
+            "You are an task creation AI that uses the result of an execution agent"
+            " to create new tasks with the following objective: {objective},"
+            " The last completed task has the result: {result}."
+            " This result was based on this task description: {task_description}."
+            " These are incomplete tasks: {incomplete_tasks}."
+            " Based on the result, create new tasks to be completed"
+            " by the AI system that do not overlap with incomplete tasks."
+            " Return the tasks as an array."
+        )
+        prompt = PromptTemplate(
+            template=task_creation_template,
+            input_variables=[
+                "result",
+                "task_description",
+                "incomplete_tasks",
+                "objective",
+            ],
+        )
+        return cls(prompt=prompt, llm=llm, verbose=verbose)
+
+
+class TaskPrioritizationChain(LLMChain):
+    """Chain to prioritize tasks."""
+
+    @classmethod
+    def from_llm(cls, llm: BaseLLM, verbose: bool = True) -> LLMChain:
+        """Get the response parser."""
+        task_prioritization_template = (
+            "You are an task prioritization AI tasked with cleaning the formatting of and reprioritizing"
+            " the following tasks: {task_names}."
+            " Consider the ultimate objective of your team: {objective}."
+            " Do not remove any tasks. Return the result as a numbered list, like:"
+            " #. First task"
+            " #. Second task"
+            " Start the task list with number {next_task_id}."
+        )
+        prompt = PromptTemplate(
+            template=task_prioritization_template,
+            input_variables=["task_names", "next_task_id", "objective"],
+        )
+        return cls(prompt=prompt, llm=llm, verbose=verbose)
+
 
 class StageAnalyzerChain(LLMChain):
     """Chain to analyze which conversation stage should the conversation move into."""
@@ -73,7 +122,8 @@ Your means of contacting is {conversation_type}
 If you're asked about where you got the user's contact information, say that you got it from the patient database of {dental_office_name}.
 Keep your responses in short length to retain the user's attention. Never produce lists, just answers.
 Start the conversation by just a greeting, give the company name and asking what is about.
-When the conversation is over, output <END_OF_CALL>
+When the conversation is over, output <END_OF_CALL>.
+You have an assistant that can help you retrieve informations from the company's database. Always question yourself if you need a tool to help you answer the user's question. When you need to use the tool, begin by outputing <BEGIN_CALL_FOR_TOOLS> then list one or several tasks to complete and output <END_CALL_FOR_TOOLS> for the assistant and wait for its summarized answer.
 Always think about at which conversation stage you are at before answering:
 
 1: Introduction: Start the conversation by introducing yourself and your company. Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming. Always clarify in your greeting what the caller can expect from you.
@@ -87,12 +137,14 @@ Example 1:
 Conversation history:
 {dental_office_secretary_name}: Hello, dental office {dental_office_name} AI secretary {dental_office_secretary_name} speaking. How can I help you ? <END_OF_TURN>
 User: Hello, I'd like to get an appointment with Doctor Mazouz. <END_OF_TURN>
-{dental_office_secretary_name}: Their is no Doctor Mazouz in our dental office. <END_OF_TURN>
+{dental_office_secretary_name}: <BEGIN_CALL_FOR_TOOLS> Is their any Doctor Mazouz in the Doctors Table from the Database ? <END_CALL_FOR_TOOLS> Their is no Doctor Mazouz in our dental office.  <END_OF_TURN>
 User: Sorry, my mistake, Doctor Anderson. <END_OF_TURN>
+{dental_office_secretary_name}: <BEGIN_CALL_FOR_TOOLS> <END_CALL_FOR_TOOLS> <END_OF_TURN>
 {dental_office_secretary_name}: Of course, what is your name ? <END_OF_TURN>
 User: John Smith. <END_OF_TURN>
 {dental_office_secretary_name}: Alright, Do you have any date and time preferences ? <END_OF_TURN>
 User: Not really, but can we try to put it in 2 days at 10:00 am ? <END_OF_TURN>
+{dental_office_secretary_name}: <BEGIN_CALL_FOR_TOOLS> <END_CALL_FOR_TOOLS> <END_OF_TURN>
 {dental_office_secretary_name}: Yes, Doctor Anderson is available the 7th of May at 10:00 am. I'm setting this appointment. Do you have any other questions ? <END_OF_TURN>
 User: No thanks, have a nice day. <END_OF_TURN> <END_OF_CALL>
 End of example 1.

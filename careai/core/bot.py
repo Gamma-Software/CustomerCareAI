@@ -11,6 +11,9 @@ from langchain import (
     SQLDatabase,
     SQLDatabaseChain
 )
+
+from langchain.agents import ZeroShotAgent, Tool, AgentExecutor
+from langchain import OpenAI, SerpAPIWrapper, LLMChain
 from langchain.prompts import MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 
@@ -118,6 +121,9 @@ class CareaiBot:
         llm = ChatOpenAI(temperature=0.9, stop = "<END_OF_TURN>", verbose=True, openai_api_key=conf.open_ai_api_key)
         agent = DentalOfficeSecretaryGPT.from_llm(llm, verbose=True, **conf.chatbot_setup)
         agent.seed_agent()
+
+
+
         return agent
 
     def process_input(self, human_input):
